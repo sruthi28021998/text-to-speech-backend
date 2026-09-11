@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
-const gTTS = require("gtts");
+const googleTTS = require("google-tts-api");
 
 const AUDIO_DIR = path.join(__dirname, "..", "audio");
 
@@ -10,30 +10,34 @@ if (!fs.existsSync(AUDIO_DIR)) {
 }
 
 /**
- * Generates an mp3 file for the given text/language pair using the free,
- * keyless Google Translate TTS engine, and returns the public path to it.
+ * Generates an mp3 file for the given text/language pair using Google
+ * Translate's TTS endpoint (via google-tts-api), and returns the public
+ * path to it. Long text is automatically split into chunks (Google's
+ * endpoint caps ~200 chars per request) and the audio is stitched back
+ * together into one file.
  */
-function generateSpeech({ text, languageCode }) {
-  return new Promise((resolve, reject) => {
-    try {
-      const fileName = `${uuidv4()}.mp3`;
-      const filePath = path.join(AUDIO_DIR, fileName);
-      const speech = new gTTS(text, languageCode);
+async function generateSpeech({ text, languageCode }) {
+  try {
+    const chunks = await googleTTS.getAllAudioBase64(text, {
+      lang: languageCode,
+      slow: false,
+      host: "https://translate.google.com",
+    });
 
-      speech.save(filePath, (err) => {
-        if (err) {
-          const wrapped = new Error("The Text-to-Speech provider failed to generate audio.");
-          wrapped.status = 503;
-          return reject(wrapped);
-        }
-        resolve({ fileName, audioUrl: `/audio/${fileName}` });
-      });
-    } catch (err) {
-      const wrapped = new Error("Unable to process the request for speech generation.");
-      wrapped.status = 500;
-      reject(wrapped);
-    }
-  });
+    const buffers = chunks.map((chunk) => Buffer.from(chunk.base64, "base64"));
+    const combinedBuffer = Buffer.concat(buffers);
+
+    const fileName = `${uuidv4()}.mp3`;
+    const filePath = path.join(AUDIO_DIR, fileName);
+    fs.writeFileSync(filePath, combinedBuffer);
+
+    return { fileName, audioUrl: `/audio/${fileName}` };
+  } catch (err) {
+    console.error("[google-tts-api error]", err.message);
+    const wrapped = new Error("The Text-to-Speech provider failed to generate audio.");
+    wrapped.status = 503;
+    throw wrapped;
+  }
 }
 
 /** Deletes generated files older than maxAgeMs (default 1 hour). */
