@@ -2,7 +2,6 @@ const { validateTtsRequest } = require("../utils/validators");
 const { voices } = require("../data/voices");
 const { generateSpeech } = require("../services/ttsService");
 
-/** POST /api/tts */
 async function convertTextToSpeech(req, res, next) {
   const validation = validateTtsRequest(req.body);
 
@@ -14,18 +13,17 @@ async function convertTextToSpeech(req, res, next) {
   const { voiceEntry } = validation;
 
   try {
-    const { audioUrl } = await generateSpeech({
+    const { audioUrl, translatedText } = await generateSpeech({
       text,
       languageCode: voiceEntry.language,
     });
 
-    return res.status(201).json({ success: true, audioUrl });
+    return res.status(201).json({ success: true, audioUrl, translatedText });
   } catch (err) {
     return next(err);
   }
 }
 
-/** GET /api/voices */
 function getVoices(req, res) {
   const { language } = req.query;
   const filtered = language ? voices.filter((v) => v.language === language) : voices;
