@@ -5,8 +5,10 @@ const cors = require("cors");
 const morgan = require("morgan");
 
 const ttsRoutes = require("./routes/ttsRoutes");
+const { requireJsonContentType } = require("./middleware/validateRequest");
+const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { cleanupOldAudio, AUDIO_DIR } = require("./services/ttsService");
-
+const healthRoutes = require("./routes/healthRoutes"); a
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -17,13 +19,17 @@ app.use(
 );
 app.use(morgan("dev"));
 app.use(express.json());
+app.use(requireJsonContentType);
 
-// --- Static audio files (generated speech) ---
 app.use("/audio", express.static(AUDIO_DIR));
 
 app.use("/api", ttsRoutes);
+app.use("/api", healthRoutes);
 
-// Periodically remove old generated audio files (every 30 min)
+// --- 404 + error handling (must be last) ---
+app.use(notFoundHandler);
+app.use(errorHandler);
+
 setInterval(() => cleanupOldAudio(), 30 * 60 * 1000);
 
 app.listen(PORT, () => {
