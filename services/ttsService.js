@@ -9,13 +9,6 @@ if (!fs.existsSync(AUDIO_DIR)) {
   fs.mkdirSync(AUDIO_DIR, { recursive: true });
 }
 
-/**
- * Generates an mp3 file for the given text/language pair using Google
- * Translate's TTS endpoint (via google-tts-api), and returns the public
- * path to it. Long text is automatically split into chunks (Google's
- * endpoint caps ~200 chars per request) and the audio is stitched back
- * together into one file.
- */
 async function generateSpeech({ text, languageCode }) {
   try {
     const chunks = await googleTTS.getAllAudioBase64(text, {
@@ -40,7 +33,6 @@ async function generateSpeech({ text, languageCode }) {
   }
 }
 
-/** Deletes generated files older than maxAgeMs (default 1 hour). */
 function cleanupOldAudio(maxAgeMs = 60 * 60 * 1000) {
   fs.readdir(AUDIO_DIR, (err, files) => {
     if (err) return;
