@@ -22,6 +22,15 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(requireJsonContentType);
 
+// --- Root route (so visiting the base URL shows something friendly) ---
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Text-to-Speech backend is running.",
+    endpoints: ["/api/health", "/api/voices", "/api/tts"],
+  });
+});
+
 app.use("/audio", express.static(AUDIO_DIR));
 
 app.use("/api", healthRoutes);
