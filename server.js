@@ -5,10 +5,11 @@ const cors = require("cors");
 const morgan = require("morgan");
 
 const ttsRoutes = require("./routes/ttsRoutes");
+const healthRoutes = require("./routes/healthRoutes");
 const { requireJsonContentType } = require("./middleware/validateRequest");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { cleanupOldAudio, AUDIO_DIR } = require("./services/ttsService");
-const healthRoutes = require("./routes/healthRoutes"); a
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -23,10 +24,9 @@ app.use(requireJsonContentType);
 
 app.use("/audio", express.static(AUDIO_DIR));
 
-app.use("/api", ttsRoutes);
 app.use("/api", healthRoutes);
+app.use("/api", ttsRoutes);
 
-// --- 404 + error handling (must be last) ---
 app.use(notFoundHandler);
 app.use(errorHandler);
 
