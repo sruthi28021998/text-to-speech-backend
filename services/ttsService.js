@@ -12,15 +12,16 @@ if (!fs.existsSync(AUDIO_DIR)) {
 
 /**
  * Translates text using the free, keyless MyMemory Translation API.
- * Chosen over Google's unofficial translate endpoint because Google
- * aggressively rate-limits requests from shared cloud/data-center IPs
- * (like Render's), which caused silent translation failures in production.
+ * The "de" (email) parameter is a standard, documented part of MyMemory's
+ * free tier that raises the daily request quota significantly — without
+ * it, shared cloud IPs (like Render's) hit the low anonymous limit fast.
  */
 async function translateText(text, targetLang) {
   const response = await axios.get("https://api.mymemory.translated.net/get", {
     params: {
       q: text,
       langpair: `en|${targetLang}`,
+      de: "sruthi28021998@gmail.com",
     },
     timeout: 10000,
   });
@@ -35,14 +36,11 @@ async function translateText(text, targetLang) {
 async function generateSpeech({ text, languageCode }) {
   let textToSpeak = text;
 
-  // Only translate if the target isn't already English — no need to
-  // round-trip through a translation service for English text.
   if (languageCode !== "en") {
     try {
       textToSpeak = await translateText(text, languageCode);
     } catch (translateErr) {
       console.error("[translation error]", translateErr.message);
-      // Fall back to the original text rather than failing the whole request.
     }
   }
 
