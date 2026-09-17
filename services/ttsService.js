@@ -10,38 +10,73 @@ if (!fs.existsSync(AUDIO_DIR)) {
   fs.mkdirSync(AUDIO_DIR, { recursive: true });
 }
 
-/**
- * Translates text using the free, keyless MyMemory Translation API.
- * The "de" (email) parameter is a standard, documented part of MyMemory's
- * free tier that raises the daily request quota significantly — without
- * it, shared cloud IPs (like Render's) hit the low anonymous limit fast.
- */
-async function translateText(text, targetLang) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Provider 1: MyMemory, with an email param to raise the free quota. */
+async function translateWithMyMemory(text, targetLang) {
   const response = await axios.get("https://api.mymemory.translated.net/get", {
     params: {
       q: text,
       langpair: `en|${targetLang}`,
       de: "sruthi28021998@gmail.com",
     },
-    timeout: 10000,
+    timeout: 8000,
   });
 
   const translated = response.data?.responseData?.translatedText;
-  if (!translated) {
-    throw new Error("Translation service returned no result.");
-  }
+  if (!translated) throw new Error("MyMemory returned no result.");
   return translated;
+}
+
+/** Provider 2: Lingva Translate — a free, open public proxy for Google Translate. */
+async function translateWithLingva(text, targetLang) {
+  const response = await axios.get(
+    `https://lingva.ml/api/v1/en/${targetLang}/${encodeURIComponent(text)}`,
+    { timeout: 8000 }
+  );
+
+  const translated = response.data?.translation;
+  if (!translated) throw new Error("Lingva returned no result.");
+  return translated;
+}
+
+/**
+ * Tries each translation provider in order, with one short retry per
+ * provider if it hits a rate limit (429). Falls back to the original
+ * text only if every provider fails — so the app degrades gracefully
+ * instead of erroring out.
+ */
+async function translateText(text, targetLang) {
+  const providers = [translateWithMyMemory, translateWithLingva];
+
+  for (const provider of providers) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        return await provider(text, targetLang);
+      } catch (err) {
+        const status = err.response?.status;
+        console.error(
+          `[translation error] ${provider.name} attempt ${attempt}:`,
+          status || err.message
+        );
+        if (status === 429 && attempt === 1) {
+          await sleep(1000); // brief pause before retrying the same provider once
+          continue;
+        }
+        break; // move on to the next provider
+      }
+    }
+  }
+
+  console.error("[translation error] all providers failed, using original text");
+  return text;
 }
 
 async function generateSpeech({ text, languageCode }) {
   let textToSpeak = text;
 
   if (languageCode !== "en") {
-    try {
-      textToSpeak = await translateText(text, languageCode);
-    } catch (translateErr) {
-      console.error("[translation error]", translateErr.message);
-    }
+    textToSpeak = await translateText(text, languageCode);
   }
 
   try {
