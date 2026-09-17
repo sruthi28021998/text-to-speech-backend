@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const googleTTS = require("google-tts-api");
-const { translate } = require("@vitalets/google-translate-api");
+const axios = require("axios");
 
 const AUDIO_DIR = path.join(__dirname, "..", "audio");
 
@@ -10,19 +10,43 @@ if (!fs.existsSync(AUDIO_DIR)) {
   fs.mkdirSync(AUDIO_DIR, { recursive: true });
 }
 
+/**
+ * Translates text using the free, keyless MyMemory Translation API.
+ * Chosen over Google's unofficial translate endpoint because Google
+ * aggressively rate-limits requests from shared cloud/data-center IPs
+ * (like Render's), which caused silent translation failures in production.
+ */
+async function translateText(text, targetLang) {
+  const response = await axios.get("https://api.mymemory.translated.net/get", {
+    params: {
+      q: text,
+      langpair: `en|${targetLang}`,
+    },
+    timeout: 10000,
+  });
+
+  const translated = response.data?.responseData?.translatedText;
+  if (!translated) {
+    throw new Error("Translation service returned no result.");
+  }
+  return translated;
+}
+
 async function generateSpeech({ text, languageCode }) {
-  try {
-    // Translate the input text into the target language first.
-    // If translation fails for any reason, fall back to speaking
-    // the original text as-is rather than failing the whole request.
-    let textToSpeak = text;
+  let textToSpeak = text;
+
+  // Only translate if the target isn't already English — no need to
+  // round-trip through a translation service for English text.
+  if (languageCode !== "en") {
     try {
-      const result = await translate(text, { to: languageCode });
-      textToSpeak = result.text;
+      textToSpeak = await translateText(text, languageCode);
     } catch (translateErr) {
       console.error("[translation error]", translateErr.message);
+      // Fall back to the original text rather than failing the whole request.
     }
+  }
 
+  try {
     const chunks = await googleTTS.getAllAudioBase64(textToSpeak, {
       lang: languageCode,
       slow: false,
