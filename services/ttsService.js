@@ -12,7 +12,25 @@ if (!fs.existsSync(AUDIO_DIR)) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Provider 1: MyMemory, with an email param to raise the free quota. */
+/** Provider 1: LibreTranslate public instance (open-source, no key needed). */
+async function translateWithLibreTranslate(text, targetLang, host) {
+  const response = await axios.post(
+    `${host}/translate`,
+    {
+      q: text,
+      source: "en",
+      target: targetLang,
+      format: "text",
+    },
+    { timeout: 8000, headers: { "Content-Type": "application/json" } }
+  );
+
+  const translated = response.data?.translatedText;
+  if (!translated) throw new Error("LibreTranslate returned no result.");
+  return translated;
+}
+
+/** Provider 2: MyMemory, kept as a second fallback with the email param. */
 async function translateWithMyMemory(text, targetLang) {
   const response = await axios.get("https://api.mymemory.translated.net/get", {
     params: {
@@ -28,43 +46,35 @@ async function translateWithMyMemory(text, targetLang) {
   return translated;
 }
 
-/** Provider 2: Lingva Translate — a free, open public proxy for Google Translate. */
-async function translateWithLingva(text, targetLang) {
-  const response = await axios.get(
-    `https://lingva.ml/api/v1/en/${targetLang}/${encodeURIComponent(text)}`,
-    { timeout: 8000 }
-  );
-
-  const translated = response.data?.translation;
-  if (!translated) throw new Error("Lingva returned no result.");
-  return translated;
-}
-
 /**
- * Tries each translation provider in order, with one short retry per
- * provider if it hits a rate limit (429). Falls back to the original
- * text only if every provider fails — so the app degrades gracefully
- * instead of erroring out.
+ * Tries multiple free translation sources in order, since any single free
+ * provider can be rate-limited when many apps share the same cloud IP.
+ * Falls back to the original text only if every provider fails.
  */
 async function translateText(text, targetLang) {
-  const providers = [translateWithMyMemory, translateWithLingva];
+  const libreHosts = [
+    "https://libretranslate.de",
+    "https://translate.astian.org",
+  ];
 
-  for (const provider of providers) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        return await provider(text, targetLang);
-      } catch (err) {
-        const status = err.response?.status;
-        console.error(
-          `[translation error] ${provider.name} attempt ${attempt}:`,
-          status || err.message
-        );
-        if (status === 429 && attempt === 1) {
-          await sleep(1000); // brief pause before retrying the same provider once
-          continue;
-        }
-        break; // move on to the next provider
+  for (const host of libreHosts) {
+    try {
+      return await translateWithLibreTranslate(text, targetLang, host);
+    } catch (err) {
+      console.error(`[translation error] LibreTranslate (${host}):`, err.response?.status || err.message);
+    }
+  }
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      return await translateWithMyMemory(text, targetLang);
+    } catch (err) {
+      console.error(`[translation error] MyMemory attempt ${attempt}:`, err.response?.status || err.message);
+      if (err.response?.status === 429 && attempt === 1) {
+        await sleep(1000);
+        continue;
       }
+      break;
     }
   }
 

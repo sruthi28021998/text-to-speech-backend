@@ -11,6 +11,7 @@ const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { cleanupOldAudio, AUDIO_DIR } = require("./services/ttsService");
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 5000;
 
 app.use(
