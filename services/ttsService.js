@@ -12,74 +12,83 @@ if (!fs.existsSync(AUDIO_DIR)) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Provider 1: LibreTranslate public instance (open-source, no key needed). */
+// In-memory cache: same text + language pair reuses the previous
+// translation instead of calling any external API again. Clears on
+// server restart, which is fine since it's just a performance/reliability
+// booster, not a data store.
+const translationCache = new Map();
+const CACHE_MAX_ENTRIES = 500;
+
+function cacheKey(text, lang) {
+  return `${lang}::${text}`;
+}
+
 async function translateWithLibreTranslate(text, targetLang, host) {
   const response = await axios.post(
     `${host}/translate`,
-    {
-      q: text,
-      source: "en",
-      target: targetLang,
-      format: "text",
-    },
+    { q: text, source: "en", target: targetLang, format: "text" },
     { timeout: 8000, headers: { "Content-Type": "application/json" } }
   );
-
   const translated = response.data?.translatedText;
   if (!translated) throw new Error("LibreTranslate returned no result.");
   return translated;
 }
 
-/** Provider 2: MyMemory, kept as a second fallback with the email param. */
 async function translateWithMyMemory(text, targetLang) {
   const response = await axios.get("https://api.mymemory.translated.net/get", {
-    params: {
-      q: text,
-      langpair: `en|${targetLang}`,
-      de: "sruthi28021998@gmail.com",
-    },
+    params: { q: text, langpair: `en|${targetLang}`, de: "sruthi28021998@gmail.com" },
     timeout: 8000,
   });
-
   const translated = response.data?.responseData?.translatedText;
   if (!translated) throw new Error("MyMemory returned no result.");
   return translated;
 }
 
-/**
- * Tries multiple free translation sources in order, since any single free
- * provider can be rate-limited when many apps share the same cloud IP.
- * Falls back to the original text only if every provider fails.
- */
 async function translateText(text, targetLang) {
-  const libreHosts = [
-    "https://libretranslate.de",
-    "https://translate.astian.org",
-  ];
+  const key = cacheKey(text, targetLang);
+  if (translationCache.has(key)) {
+    return translationCache.get(key);
+  }
+
+  const libreHosts = ["https://libretranslate.de", "https://translate.astian.org"];
+  let result = null;
 
   for (const host of libreHosts) {
     try {
-      return await translateWithLibreTranslate(text, targetLang, host);
+      result = await translateWithLibreTranslate(text, targetLang, host);
+      break;
     } catch (err) {
       console.error(`[translation error] LibreTranslate (${host}):`, err.response?.status || err.message);
     }
   }
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      return await translateWithMyMemory(text, targetLang);
-    } catch (err) {
-      console.error(`[translation error] MyMemory attempt ${attempt}:`, err.response?.status || err.message);
-      if (err.response?.status === 429 && attempt === 1) {
-        await sleep(1000);
-        continue;
+  if (!result) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        result = await translateWithMyMemory(text, targetLang);
+        break;
+      } catch (err) {
+        console.error(`[translation error] MyMemory attempt ${attempt}:`, err.response?.status || err.message);
+        if (err.response?.status === 429 && attempt === 1) {
+          await sleep(1000);
+          continue;
+        }
       }
-      break;
     }
   }
 
-  console.error("[translation error] all providers failed, using original text");
-  return text;
+  if (!result) {
+    console.error("[translation error] all providers failed, using original text");
+    result = text;
+  }
+
+  if (translationCache.size >= CACHE_MAX_ENTRIES) {
+    const firstKey = translationCache.keys().next().value;
+    translationCache.delete(firstKey);
+  }
+  translationCache.set(key, result);
+
+  return result;
 }
 
 async function generateSpeech({ text, languageCode }) {
